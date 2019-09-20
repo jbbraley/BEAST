@@ -1,0 +1,17 @@
+Name,MAC,DHCP capable,Desc
+EVAP CTRL1,D8:80:39:37:DA:AB,yes,Chiller (Top)
+EVAP CTRL2,D8:80:39:37:DA:8B,yes,Chiller (Top)
+EVAP CTRL3,D8:80:39:37:DA:6F,yes,Chiller (Top)
+EVAP CTRL4,D8:80:39:37:E3:B8,yes,Chiller (Top)
+EVAP CTRL5,D8:80:39:B5:F8:54,yes,Chiller (Bottom)
+EVAP CTRL6,D8:80:39:B5:F5:8E,yes,Chiller (Bottom)
+EVAP CTRL7,D8:80:39:B5:F6:D5,yes,Chiller (Bottom)
+EVAP CTRL8,D8:80:39:B5:F7:B3,yes,Chiller (Bottom)
+PLC MASTER,00:e0:62:90:0e:97,no,Master controller
+PLC SLAVE CHAMBER,00:e0:62:00:50:9C,no,Controller in chamber
+PLC SLAVE CARRIAGE,00:e0:62:00:50:86,no,Controller on carriage
+CAMERA1,00:07:5F:7D:2F:15,yes,Camera inside chamber
+CAMERA2,00:07:5F:81:BD:F0,yes,Camera inside chamber
+,,,
+CR6,00:d0:2c:08:1c:6c,,Master DAQ (Campbell)
+CR1000,00:d0:2c:05:09:C6,,Secondary DAQ (Campbell)

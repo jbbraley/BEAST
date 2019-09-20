@@ -1,0 +1,19 @@
+Name,MAC,DHCP capable,Desc,IP Address
+EVAP CTRL1 ,D8:80:39:37:DA:AB,yes,Chiller (Top),172.18.1.101
+EVAP CTRL2,D8:80:39:37:DA:8B,yes,Chiller (Top),172.18.1.102
+EVAP CTRL3,D8:80:39:37:DA:6F,yes,Chiller (Top),172.18.1.103
+EVAP CTRL4,D8:80:39:37:E3:B8,yes,Chiller (Top),172.18.1.104
+EVAP CTRL5,D8:80:39:B5:F8:54,yes,Chiller (Bottom),172.18.1.105
+EVAP CTRL6,D8:80:39:B5:F5:8E,yes,Chiller (Bottom),172.18.1.106
+EVAP CTRL7,D8:80:39:B5:F6:D5,yes,Chiller (Bottom),172.18.1.107
+EVAP CTRL8,D8:80:39:B5:F7:B3,yes,Chiller (Bottom),172.18.1.108
+PLC MASTER,00:e0:62:90:0e:97,no,Master controller,172.18.1.109
+PLC SLAVE CHAMBER,00:e0:62:00:50:9C,no,Controller in chamber,172.18.1.110
+PLC SLAVE CARRIAGE,00:e0:62:00:50:86,no,Controller on carriage,172.18.1.111
+CAMERA1,00:07:5F:7D:2F:15,yes,Camera inside chamber,172.18.1.112
+CAMERA2,00:07:5F:81:BD:F0,yes,Camera inside chamber,172.18.1.113
+,,,,
+CR6,00:d0:2c:08:1c:6c,,Master DAQ (Campbell),172.18.1.209
+CR1000,00:d0:2c:05:09:C6,,Secondary DAQ (Campbell),172.18.1.210
+,,,,
+Lab computer,,,,172.18.1.219

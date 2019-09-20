@@ -1,0 +1,29 @@
+Systems to be controlled:
+Heating, cooling, live load apparatus, brine application,
+Current integration:
+heating, live load and brine on one system: custom PLC program 
+cooling on separate systems
+
+Needs for operation:
+Automatically cycle heating and cooling to achieve set temperatures
+	Provide a schedule of temperature targets
+	Turn on chiller or heaters as required to provide conditioning necessary to achieve specified targets
+	Need integration of the systems
+		New control system for both systems (take heating off existing program)
+		Allow programatic input into existing program. 
+		Integrate cooling controls into current program.
+Spray brine based on schedule or based on temperature (or both)
+	Provide a schedule of brine spray pump operation
+	Allow outside input or trigger spray pump based on temperature
+Run live load on a schedule
+	Load and speed parameters provided as a schedule
+
+Ideal schedule: loop through table of parameters values for x hours
+
+Needs for visualization
+Publically published variables:
+	Current control parameters
+	Current conditions (including load level and speed)
+	Equipment status tables (especially warnings and errors)
+
+

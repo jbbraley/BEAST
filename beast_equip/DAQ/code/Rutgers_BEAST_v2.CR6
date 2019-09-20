@@ -1,0 +1,642 @@
+'                       Program name: Rutgers_BEAST_v1.CR6
+'                       Date written: 01-27-2019
+'                       Written By: NCD
+'
+'   Program Revisions:
+'
+'              Date: 01/27/2019     By: NCD     Version: b.0.0     Description: Beta Version 0.0
+'              Date: 03/06/2019     By: NCD     Version: 1     Description: Final, for release. 
+'
+'   DataLogger:      CR6 Datalogger with eleven (11) CDM-VW305 and one (1) CDM-A116.
+'                    Configured for 86 VW  sensors and up to 16 differential voltage displacement sensors
+'                    Scanning interval set to 20 Hz
+'
+'   Sensors:         102 sensors currently being used:
+'                    44 Geokon Model 4100 2" Vibrating wire strain gages
+'                    36 Geokon Model 4911 rebar sister bars
+'                    6 Geokon Model 4000 6" strain gages
+'
+'   Output Tables:   1 - AvgData
+'                           - Triggered on Flag(1) High
+'                           - Records max, min, and average for all sensors every hour
+'                    2 - LogStat
+'                           - Records Batt voltage, Batt Current, Load, Voltage_in, Current_in, Charge, Temp, Charge State, Check Battery every hour
+'                    3 - RawData
+'                           - Triggered on Flag(2) High
+'                           - Sample all sensors at fastest rate possible
+'                    4 - VW_Diagnostics
+'                           - Sample all diagnostic information (6 numeric values) from VW sensors at fastest rate possible
+'                           - Frequency, Amplitude, Signal To Noise, Noise Frequency, Decay Ratio, Thermistor
+'
+'   Flags:           1 - High: Record data into Data Table 1
+'                        Low: Stops recording of data into Table 1.
+'                        Default Value: True
+'                        Conditional Change of State: No, Always True
+'                    2 - High: Record data into Data Table 3
+'                        Low: Stops recording of data into Table 3.
+'                        Default Value: False
+'                        Conditional Change of State: No, Always False (For onsite diagnostics)
+'                    3 - High: Record data into Data Table 4.
+'                        Low: Stops recording of data into Table 4.
+'                        Default Value: False
+'                        Conditional Change of State: No, Always False (For onsite diagnostics)
+'                    4 - High: Calls Subroutines Baselines and Zero
+'                        Low: Default Value
+'                        Default Value: False
+'                        Conditional Change of State: Yes, Calls Subroutines Baselines and Zero
+'
+'
+'
+'   Ports:           1 -
+'                    2 -
+'
+'
+'
+'
+'\\\\\\\\\\\\\\\\\\\\\\\\\\  DECLARE VARIABLES //////////////////////////
+'
+'-------------------------  USER INPUT SECTION  -------------------------------------------------------------------------------------------------
+
+Const ScanInterval = 50                             'INPUT the scan interval (in milliseconds) based on the number of gages
+
+'------------------------  GENERAL VARIABLE DEFINITIONS  -----------------------
+Dim VW_OUT1(8,1),VW_OUT2(8,1),VW_OUT3(8,1),VW_OUT4(8,1),VW_OUT5(8,1)     'Declare Raw Data Array
+Dim VW_OUT6(8,1),VW_OUT7(8,1),VW_OUT8(8,1),VW_OUT9(8,1),VW_OUT10(8,1)', VW_OUT11(8,1)     'Declare Raw Data Array
+Dim DIAG1(8),DIAG2(8),DIAG3(8),DIAG4(8),DIAG5(8)     'Declare Raw Data Array
+Dim DIAG6(8),DIAG7(8),DIAG8(8),DIAG9(8),DIAG10(8)', DIAG11(8)     'Declare Raw Data Array
+Dim VW_STATIC_OUT1(8),VW_STATIC_OUT2(8),VW_STATIC_OUT3(8),VW_STATIC_OUT4(8),VW_STATIC_OUT5(8),VW_STATIC_OUT6(8)
+Dim VW_STATIC_OUT7(8),VW_STATIC_OUT8(8),VW_STATIC_OUT9(8),VW_STATIC_OUT10(8)',VW_STATIC_OUT11(8)
+Dim VW_STATIC_THERM1(8),VW_STATIC_THERM2(8),VW_STATIC_THERM3(8),VW_STATIC_THERM4(8),VW_STATIC_THERM5(8),VW_STATIC_THERM6(8)
+Dim VW_STATIC_THERM7(8),VW_STATIC_THERM8(8),VW_STATIC_THERM9(8),VW_STATIC_THERM10(8)',VW_STATIC_THERM11(8)
+Dim VW_STATIC_SD1(8),VW_STATIC_SD2(8),VW_STATIC_SD3(8),VW_STATIC_SD4(8),VW_STATIC_SD5(8),VW_STATIC_SD6(8)
+Dim VW_STATIC_SD7(8),VW_STATIC_SD8(8),VW_STATIC_SD9(8),VW_STATIC_SD10(8)',VW_STATIC_SD11(8)
+
+Const VW_Strain_Mult = 0.391*.929/1000
+
+'------------------------  FILE VARIABLE DEFINITIONS  -----------------------
+Public OutStat As Boolean
+Public LastFileName As String * 25
+Public OpenBase As Long
+Public ReadBase
+Public BaseString As String * 1500
+Public CloseBase
+
+'  CDM 1 - 8 Geokon 4100 Strain Gages
+Const CPI_ADDR_1 = 1
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+'Set to true (Enabled=1, Disabled=0) only those channels which have sensors connected
+Dim Enable1(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+'Specify the target resonant amplitude at which the sensor will be maintained
+'via excitation, given in volts. This should be in the range 0.010 to 0.001
+Dim Max_AMP1(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+'Low Frequency Boundary (sensor frequency should never fall below
+'this value regardless of environmental changes)
+Dim F_Low1(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+'High Frequency Boundary (sensor frequency should never exceed
+'this value regardless of environmental changes)
+Dim F_High1(8) =                { 3500,     3500,     3500,     3500,     3500,     3500,     3500,     3500 }
+'Output Format - Hz vs. Hz^2 :: Value of 0 – measured frequency is given in units of Hz,
+'Value of 1 – measured frequency is squared and given in units of Hz^2
+Dim OutForm1(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+'Multiplier (factor) to be applied to sensor output frequency
+Dim Mult1(8) =                  { VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult}
+'Offset (shift) to be applied to sensor output frequency
+Dim Off1(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 2 - 8 Geokon 4100 Strain Gages
+Const CPI_ADDR_2 = 2
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable2(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP2(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low2(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High2(8) =                { 3500,     3500,     3500,     3500,     3500,     3500,     3500,     3500 }
+Dim OutForm2(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult2(8) =                  { VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult}
+Dim Off2(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 3 - 8 Geokon 4100 Strain Gages
+Const CPI_ADDR_3 = 3
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable3(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP3(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low3(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High3(8) =                { 3500,     3500,     3500,     3500,     3500,     3500,     3500,     3500 }
+Dim OutForm3(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult3(8) =                  { VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult}
+Dim Off3(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 4 - 8 Geokon 4100 Strain Gages
+Const CPI_ADDR_4 = 4
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable4(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP4(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low4(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High4(8) =                { 3500,     3500,     3500,     3500,     3500,     3500,     3500,     3500 }
+Dim OutForm4(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult4(8) =                  { VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult}
+Dim Off4(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 5 - 8 Geokon 4100 Strain Gages
+Const CPI_ADDR_5 = 5
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable5(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP5(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low5(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High5(8) =                { 3500,     3500,     3500,     3500,     3500,     3500,     3500,     3500 }
+Dim OutForm5(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult5(8) =                  { VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult, VW_Strain_Mult}
+Dim Off5(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 6 - 4 Geokon 4100 Strain Gages and 4 Geokon 4911 Sisterbars
+Const CPI_ADDR_6 = 6
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable6(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP6(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low6(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High6(8) =                { 3200,     3200,     3200,     3200,     3200,     3200,     3200,     3200 }
+Dim OutForm6(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult6(8) =                  { 0.345/1000, 0.346/1000, 0.353/1000, 0.355/1000, 0.352/1000 , 0.348/1000 , 0.348/1000 , 0.354/1000}
+Dim Off6(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 7 - 8 Geokon 4911 Sisterbars
+Const CPI_ADDR_7 = 7
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable7(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP7(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low7(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High7(8) =                { 3200,     3200,     3200,     3200,     3200,     3200,     3200,     3200 }
+Dim OutForm7(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult7(8) =                  { 0.352/1000, 0.350/1000, 0.351/1000, 0.351/1000, 0.351/1000 , 0.354/1000 , 0.349/1000 , 0.35/1000}
+Dim Off7(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 8 - 8 Geokon 4911 Sisterbars
+Const CPI_ADDR_8 = 8
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable8(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP8(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low8(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High8(8) =                { 3200,     3200,     3200,     3200,     3200,     3200,     3200,     3200 }
+Dim OutForm8(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult8(8) =                  { 0.351/1000, 0.351/1000, 0.349/1000, 0.35/1000, 0.351/1000 , 0.349/1000 , 0.348/1000 , 0.35/1000}
+Dim Off8(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 9 - 8 Geokon 4911 Sisterbars
+Const CPI_ADDR_9 = 9
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable9(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP9(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low9(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High9(8) =                { 3200,     3200,     3200,     3200,     3200,     3200,     3200,     3200 }
+Dim OutForm9(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult9(8) =                  { 0.345/1000, 0.349/1000, 0.351/1000, 0.353/1000, 0.349/1000 , 0.351/1000 , 0.351/1000 , 0.354/1000}
+Dim Off9(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+'  CDM 10 - 8 Geokon 4911 Sisterbars
+Const CPI_ADDR_10 = 10
+'                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+'                                 ---       ---       ---       ---       ---       ---       ---       ---
+Dim Enable10(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Max_AMP10(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+Dim F_Low10(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+Dim F_High10(8) =                { 3200,     3200,     3200,     3200,     3200,     3200,     3200,     3200 }
+Dim OutForm10(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+Dim Mult10(8) =                  { 0.351/1000, 0.352/1000, 0.352/1000, 0.35/1000, 0.35/1000 , 0.351/1000 , 0.353/1000 , 0.352/1000}
+Dim Off10(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+
+''  CDM 11 - 8 Geokon 4911 Sisterbars
+'Const CPI_ADDR_11 = 11
+''                                 CH1       CH2       CH3       CH4       CH5       CH6       CH7       CH8
+''                                 ---       ---       ---       ---       ---       ---       ---       ---
+'Dim Enable11(8) As Long =        { 1,        1,        1,        1,        1,        1,        1,        1    }
+'Dim Max_AMP11(8) =               { 0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002,    0.002}
+'Dim F_Low11(8) =                 { 1400,     1400,     1400,     1400,     1400,     1400,     1400,     1400  }
+'Dim F_High11(8) =                { 3200,     3200,     3200,     3200,     3200,     3200,     3200,     3200 }
+'Dim OutForm11(8) As Long =       { 1,        1,        1,        1,        1,        1,        1,        1    }
+'Dim Mult11(8) =                  { 0.00035 , 0.00035 , 0.00035 , 0.00035 , 0.00035 , 0.00035 , 0.00035 , 0.00035 }
+'Dim Off11(8) =                   { 0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0,      0.0  }
+
+Const A = 0.0014051
+Const B = 0.0002369
+Const C = 0.0000001019
+'Steinhart-Hart coefficients [A,B,C] for converting thermistor ohms to
+'temperature in Celsius. Specifying zeroes for A,B,C results in a reading in Ohms.
+Dim SteinA(8) =                  { A,      A,      A,      A,      A,      A,      A,      A}
+Dim SteinB(8) =                  { B,      B,      B,      B,      B,      B,      B,      B}
+Dim SteinC(8) =                  { C,      C,      C,      C,      C,      C,      C,      C}
+'Rainflow configuration (not used in this program, but required as configuration arguments)
+Dim RFMB(8) As Long =            { 20,       20,       20,       20,       20,       20,       20,       20}
+Dim RFAB(8) As Long =            { 20,       20,       20,       20,       20,       20,       20,       20}
+Dim RFLL(8) =                    { 400.0,    400.0,    400.0,    400.0,    400.0,    400.0,    400.0,    400.0}
+Dim RFHL(8) =                    { 4000.0,   4000.0,   4000.0,   4000.0,   4000.0,   4000.0,   4000.0,   4000.0}
+Dim RFHY(8) =                    { 0.005,    0.005,    0.005,    0.005,    0.005,    0.005,    0.005,    0.005}
+Dim RFOF(8) As Long =            { 100,      100,      100,      100,      100,      100,      100,      100}
+
+'  CDM 12 - 12 Celesco String pots and 2 TML LVDT's
+Const CPI_ADDR_12 = 12
+Const NUM_SPOT = 12
+Const NUM_TML = 2
+Const MULT_SPOT = 2/2000  'in/mV (x2 to account for VDIV2:1)
+Const MULT_TML = 4 'mm/mV/V
+Const NUM_REPS_TOTAL = 8*10+NUM_TML+NUM_SPOT
+Dim S_POT(NUM_SPOT,1), TML(NUM_TML,1)
+
+' Dimension final storage and recording variables. NOTE: This can be aliased for convenience.
+Dim DATA_COMPILED(NUM_REPS_TOTAL,1)
+Public DATA_ZERO(NUM_REPS_TOTAL,1)
+Public Flag(4), PTemp, BattVDC, Trigger
+Dim Offset_Value(NUM_REPS_TOTAL,1), I
+
+' Define triggered recording thresholds (to be configured by Rutgers)
+Const Thresh = 1000000
+
+' Define aliases
+Alias DATA_ZERO(1) = G1_L2_W
+Alias DATA_ZERO(2) = G1_L2_F_I
+Alias DATA_ZERO(3) = G1_L2_F_E
+Alias DATA_ZERO(4) = G1_L4_W
+Alias DATA_ZERO(5) = G1_L4_F_M
+Alias DATA_ZERO(6) = G2_L2_W
+Alias DATA_ZERO(7) = G2_L2_F_M
+Alias DATA_ZERO(8) = G2_L4_W
+Alias DATA_ZERO(9) = G2_L4_F_M
+Alias DATA_ZERO(10) = G3_L2_W
+Alias DATA_ZERO(11) = G3_L2_F_M
+Alias DATA_ZERO(12) = G3_L4_W
+Alias DATA_ZERO(13) = G3_L4_F_M
+Alias DATA_ZERO(14) = G3_L6_Exp
+Alias DATA_ZERO(15) = G3_L6_Fix
+Alias DATA_ZERO(16) = G3_L6_00
+Alias DATA_ZERO(17) = G4_L2_W
+Alias DATA_ZERO(18) = G4_L2_F_I
+Alias DATA_ZERO(19) = G4_L2_F_E
+Alias DATA_ZERO(20) = G4_L4_W
+Alias DATA_ZERO(21) = G4_L4_F_M
+Alias DATA_ZERO(22) = G4_L6_Exp
+Alias DATA_ZERO(23) = G4_L6_Fix
+Alias DATA_ZERO(24) = G4_L6_00
+Alias DATA_ZERO(25) = P_G1_F_I
+Alias DATA_ZERO(26) = P_G1_F_E
+Alias DATA_ZERO(27) = P_G1_E_I
+Alias DATA_ZERO(28) = P_G1_E_E
+Alias DATA_ZERO(29) = P_G2_F_I
+Alias DATA_ZERO(30) = P_G2_F_E
+Alias DATA_ZERO(31) = P_G2_E_I
+Alias DATA_ZERO(32) = P_G2_E_E
+Alias DATA_ZERO(33) = P_G3_F_I
+Alias DATA_ZERO(34) = P_G3_F_E
+Alias DATA_ZERO(35) = P_G3_E_I
+Alias DATA_ZERO(36) = P_G3_E_E
+Alias DATA_ZERO(37) = P_G4_F_I
+Alias DATA_ZERO(38) = P_G4_F_E
+Alias DATA_ZERO(39) = P_G4_E_I
+Alias DATA_ZERO(40) = P_G4_E_E
+Alias DATA_ZERO(41) = D_H1_L2_T_L
+Alias DATA_ZERO(42) = D_H1_L4_T_L
+Alias DATA_ZERO(43) = D_H2_L2_T_L
+Alias DATA_ZERO(44) = D_H2_L2_T_T
+Alias DATA_ZERO(45) = D_H2_L2_B_L
+Alias DATA_ZERO(46) = D_H2_L2_B_T
+Alias DATA_ZERO(47) = D_H2_L4_T_L
+Alias DATA_ZERO(48) = D_H2_L4_T_T
+Alias DATA_ZERO(49) = D_H2_L4_B_L
+Alias DATA_ZERO(50) = D_H2_L4_B_T
+Alias DATA_ZERO(51) = D_H3_L2_T_L
+Alias DATA_ZERO(52) = D_H3_L2_T_T
+Alias DATA_ZERO(53) = D_H3_L2_B_L
+Alias DATA_ZERO(54) = D_H3_L2_B_T
+Alias DATA_ZERO(55) = D_H3_L4_T_L
+Alias DATA_ZERO(56) = D_H3_L4_T_T
+Alias DATA_ZERO(57) = D_H3_L4_B_T
+Alias DATA_ZERO(58) = D_H4_L2_T_L
+Alias DATA_ZERO(59) = D_H4_L2_T_T
+Alias DATA_ZERO(60) = D_H4_L2_B_L
+Alias DATA_ZERO(61) = D_H4_L2_B_T
+Alias DATA_ZERO(62) = D_H5_L1_T_L
+Alias DATA_ZERO(63) = D_H5_L2_T_L
+Alias DATA_ZERO(64) = D_H5_L2_T_T
+Alias DATA_ZERO(65) = D_H5_L2_B_L
+Alias DATA_ZERO(66) = D_H5_L2_B_T
+Alias DATA_ZERO(67) = D_H5_L4_T_L
+Alias DATA_ZERO(68) = D_H5_L4_T_T
+Alias DATA_ZERO(69) = D_H5_L4_B_T
+Alias DATA_ZERO(70) = D_H6_L2_T_L
+Alias DATA_ZERO(71) = D_H6_L2_T_T
+Alias DATA_ZERO(72) = D_H6_L2_B_L
+Alias DATA_ZERO(73) = D_H6_L2_B_T
+Alias DATA_ZERO(74) = D_H6_L4_T_L
+Alias DATA_ZERO(75) = D_H6_L4_T_T
+Alias DATA_ZERO(76) = D_H6_L4_B_L
+Alias DATA_ZERO(77) = D_H6_L4_B_T
+Alias DATA_ZERO(78) = D_H7_L1_T_L
+Alias DATA_ZERO(79) = D_H7_L2_T_L
+Alias DATA_ZERO(80) = D_H7_L4_T_L
+Alias DATA_ZERO(81) = G1_L1_DI
+Alias DATA_ZERO(82) = G1_L2_DI
+Alias DATA_ZERO(83) = G1_L4_DI
+Alias DATA_ZERO(84) = G2_L1_DI
+Alias DATA_ZERO(85) = G2_L2_DI
+Alias DATA_ZERO(86) = G2_L4_DI
+Alias DATA_ZERO(87) = G3_L1_DI
+Alias DATA_ZERO(88) = G3_L2_DI
+Alias DATA_ZERO(89) = G3_L4_DI
+Alias DATA_ZERO(90) = G4_L1_DI
+Alias DATA_ZERO(91) = G4_L2_DI
+Alias DATA_ZERO(92) = G4_L4_DI
+Alias DATA_ZERO(93) = G1_Exp
+Alias DATA_ZERO(94) = G4_Exp
+
+Alias VW_STATIC_THERM1(1) = G1_L2_W_Temp
+Alias VW_STATIC_THERM1(2) = G1_L2_F_I_Temp
+Alias VW_STATIC_THERM1(3) = G1_L2_F_E_Temp
+Alias VW_STATIC_THERM1(4) = G1_L4_W_Temp
+Alias VW_STATIC_THERM1(5) = G1_L4_F_M_Temp
+Alias VW_STATIC_THERM1(6) = G2_L2_W_Temp
+Alias VW_STATIC_THERM1(7) = G2_L2_F_M_Temp
+Alias VW_STATIC_THERM1(8) = G2_L4_W_Temp
+Alias VW_STATIC_THERM2(1) = G2_L4_F_M_Temp
+Alias VW_STATIC_THERM2(2) = G3_L2_W_Temp
+Alias VW_STATIC_THERM2(3) = G3_L2_F_M_Temp
+Alias VW_STATIC_THERM2(4) = G3_L4_W_Temp
+Alias VW_STATIC_THERM2(5) = G3_L4_F_M_Temp
+Alias VW_STATIC_THERM2(6) = G3_L6_Exp_Temp
+Alias VW_STATIC_THERM2(7) = G3_L6_Fix_Temp
+Alias VW_STATIC_THERM2(8) = G3_L6_00_Temp
+Alias VW_STATIC_THERM3(1) = G4_L2_W_Temp
+Alias VW_STATIC_THERM3(2) = G4_L2_F_I_Temp
+Alias VW_STATIC_THERM3(3) = G4_L2_F_E_Temp
+Alias VW_STATIC_THERM3(4) = G4_L4_W_Temp
+Alias VW_STATIC_THERM3(5) = G4_L4_F_M_Temp
+Alias VW_STATIC_THERM3(6) = G4_L6_Exp_Temp
+Alias VW_STATIC_THERM3(7) = G4_L6_Fix_Temp
+Alias VW_STATIC_THERM3(8) = G4_L6_00_Temp
+Alias VW_STATIC_THERM4(1) = P_G1_F_I_Temp
+Alias VW_STATIC_THERM4(2) = P_G1_F_E_Temp
+Alias VW_STATIC_THERM4(3) = P_G1_E_I_Temp
+Alias VW_STATIC_THERM4(4) = P_G1_E_E_Temp
+Alias VW_STATIC_THERM4(5) = P_G2_F_I_Temp
+Alias VW_STATIC_THERM4(6) = P_G2_F_E_Temp
+Alias VW_STATIC_THERM4(7) = P_G2_E_I_Temp
+Alias VW_STATIC_THERM4(8) = P_G2_E_E_Temp
+Alias VW_STATIC_THERM5(1) = P_G3_F_I_Temp
+Alias VW_STATIC_THERM5(2) = P_G3_F_E_Temp
+Alias VW_STATIC_THERM5(3) = P_G3_E_I_Temp
+Alias VW_STATIC_THERM5(4) = P_G3_E_E_Temp
+Alias VW_STATIC_THERM5(5) = P_G4_F_I_Temp
+Alias VW_STATIC_THERM5(6) = P_G4_F_E_Temp
+Alias VW_STATIC_THERM5(7) = P_G4_E_I_Temp
+Alias VW_STATIC_THERM5(8) = P_G4_E_E_Temp
+Alias VW_STATIC_THERM6(1) = D_H1_L2_T_L_Temp
+Alias VW_STATIC_THERM6(2) = D_H1_L4_T_L_Temp
+Alias VW_STATIC_THERM6(3) = D_H2_L2_T_L_Temp
+Alias VW_STATIC_THERM6(4) = D_H2_L2_T_T_Temp
+Alias VW_STATIC_THERM6(5) = D_H2_L2_B_L_Temp
+Alias VW_STATIC_THERM6(6) = D_H2_L2_B_T_Temp
+Alias VW_STATIC_THERM6(7) = D_H2_L4_T_L_Temp
+Alias VW_STATIC_THERM6(8) = D_H2_L4_T_T_Temp
+Alias VW_STATIC_THERM7(1) = D_H2_L4_B_L_Temp
+Alias VW_STATIC_THERM7(2) = D_H2_L4_B_T_Temp
+Alias VW_STATIC_THERM7(3) = D_H3_L2_T_L_Temp
+Alias VW_STATIC_THERM7(4) = D_H3_L2_T_T_Temp
+Alias VW_STATIC_THERM7(5) = D_H3_L2_B_L_Temp
+Alias VW_STATIC_THERM7(6) = D_H3_L2_B_T_Temp
+Alias VW_STATIC_THERM7(7) = D_H3_L4_T_L_Temp
+Alias VW_STATIC_THERM7(8) = D_H3_L4_T_T_Temp
+Alias VW_STATIC_THERM8(1) = D_H3_L4_B_T_Temp
+Alias VW_STATIC_THERM8(2) = D_H4_L2_T_L_Temp
+Alias VW_STATIC_THERM8(3) = D_H4_L2_T_T_Temp
+Alias VW_STATIC_THERM8(4) = D_H4_L2_B_L_Temp
+Alias VW_STATIC_THERM8(5) = D_H4_L2_B_T_Temp
+Alias VW_STATIC_THERM8(6) = D_H5_L1_T_L_Temp
+Alias VW_STATIC_THERM8(7) = D_H5_L2_T_L_Temp
+Alias VW_STATIC_THERM8(8) = D_H5_L2_T_T_Temp
+Alias VW_STATIC_THERM9(1) = D_H5_L2_B_L_Temp
+Alias VW_STATIC_THERM9(2) = D_H5_L2_B_T_Temp
+Alias VW_STATIC_THERM9(3) = D_H5_L4_T_L_Temp
+Alias VW_STATIC_THERM9(4) = D_H5_L4_T_T_Temp
+Alias VW_STATIC_THERM9(5) = D_H5_L4_B_T_Temp
+Alias VW_STATIC_THERM9(6) = D_H6_L2_T_L_Temp
+Alias VW_STATIC_THERM9(7) = D_H6_L2_T_T_Temp
+Alias VW_STATIC_THERM9(8) = D_H6_L2_B_L_Temp
+Alias VW_STATIC_THERM10(1) = D_H6_L2_B_T_Temp
+Alias VW_STATIC_THERM10(2) = D_H6_L4_T_L_Temp
+Alias VW_STATIC_THERM10(3) = D_H6_L4_T_T_Temp
+Alias VW_STATIC_THERM10(4) = D_H6_L4_B_L_Temp
+Alias VW_STATIC_THERM10(5) = D_H6_L4_B_T_Temp
+Alias VW_STATIC_THERM10(6) = D_H7_L1_T_L_Temp
+Alias VW_STATIC_THERM10(7) = D_H7_L2_T_L_Temp
+Alias VW_STATIC_THERM10(8) = D_H7_L4_T_L_Temp
+
+'Configure the CDM-VW300 series device. Use the variable arrays declared above.
+CDM_VW300Config(1,CPI_ADDR_1,0,Enable1(),Max_AMP1(),F_Low1(),F_High1(),OutForm1(),Mult1(),Off1(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_2,0,Enable2(),Max_AMP2(),F_Low2(),F_High2(),OutForm2(),Mult2(),Off2(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_3,0,Enable3(),Max_AMP3(),F_Low3(),F_High3(),OutForm3(),Mult3(),Off3(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_4,0,Enable4(),Max_AMP4(),F_Low4(),F_High4(),OutForm4(),Mult4(),Off4(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_5,0,Enable5(),Max_AMP5(),F_Low5(),F_High5(),OutForm5(),Mult5(),Off5(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_6,0,Enable6(),Max_AMP6(),F_Low6(),F_High6(),OutForm6(),Mult6(),Off6(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_7,0,Enable7(),Max_AMP7(),F_Low7(),F_High7(),OutForm7(),Mult7(),Off7(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_8,0,Enable8(),Max_AMP8(),F_Low8(),F_High8(),OutForm8(),Mult8(),Off8(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_9,0,Enable9(),Max_AMP9(),F_Low9(),F_High9(),OutForm9(),Mult9(),Off9(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+CDM_VW300Config(1,CPI_ADDR_10,0,Enable10(),Max_AMP10(),F_Low10(),F_High10(),OutForm10(),Mult10(),Off10(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+'CDM_VW300Config(1,CPI_ADDR_11,0,Enable11(),Max_AMP11(),F_Low11(),F_High11(),OutForm11(),Mult11(),Off11(),SteinA(),SteinB(),SteinC(),RFMB(),RFAB(),RFLL(),RFHL(),RFHY(),RFOF())
+
+' Define Storage Tables
+DataTable (OUT_DYNAMIC,-1,-1 )
+  DataInterval (0,0,mSec,10)
+  DataEvent (2*1000/ScanInterval,Trigger>=Thresh,Trigger<=Thresh,2*1000/ScanInterval)
+  Sample (NUM_REPS_TOTAL,DATA_ZERO(),IEEE4)
+  CardOut (0 ,-1 )
+EndTable
+
+DataTable (AVG_DATA,True,2000 )
+  DataInterval (0,1,Min,10)
+  Average (NUM_REPS_TOTAL,DATA_ZERO(),IEEE4,False)
+  Maximum (NUM_REPS_TOTAL,DATA_ZERO(),IEEE4,False,False)
+  Minimum (NUM_REPS_TOTAL,DATA_ZERO(),IEEE4,False,False)
+  Average (8,VW_STATIC_THERM1(),FP2,False)
+  Average (8,VW_STATIC_THERM2(),FP2,False)
+  Average (8,VW_STATIC_THERM3(),FP2,False)
+  Average (8,VW_STATIC_THERM4(),FP2,False)
+  Average (8,VW_STATIC_THERM5(),FP2,False)
+  Average (8,VW_STATIC_THERM6(),FP2,False)
+  Average (8,VW_STATIC_THERM7(),FP2,False)
+  Average (8,VW_STATIC_THERM8(),FP2,False)
+  Average (8,VW_STATIC_THERM9(),FP2,False)
+  Average (8,VW_STATIC_THERM10(),FP2,False)
+  CardOut(0,250000)
+EndTable
+
+DataTable(LogStat,True,-1)               'Called, Size 500
+  DataInterval(0,1,Min, 0)                '60 minute interval, Time stamp every interval
+  Sample (1,PTemp,FP2)
+  Sample (1,BattVDC,FP2,False)
+  CardOut(0,250000)
+EndTable
+'---------------------------- Table 3 ----------------------------
+DataTable(RawData_Dynamic,Flag(2),-1)         'Called, Size 500
+  DataInterval(0,0,0,0)                'Fast as possible, Time stamp every interval
+  Sample(NUM_REPS_TOTAL,DATA_COMPILED(),IEEE4)
+  CardOut(0,250000)
+EndTable
+'---------------------------- Table 4  ----------------------------
+DataTable(VW_Diagnostics,Flag(3),-1)                'Called, Size 500
+  DataInterval(0,0,0,0)                              'Fast as possible, Time stamp every interval
+  Sample(8,DIAG1(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG2(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG3(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG4(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG5(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG6(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG7(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG8(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG9(),FP2,False)                             'Fast as possible, Time stamp every interval
+  Sample(8,DIAG10(),FP2,False)                             'Fast as possible, Time stamp every interval
+'  Sample(8,DIAG11(),FP2,False)
+  CardOut(0,100000)
+EndTable
+'---------------------------- Table 5 - Baseline Reading Table ----------------------------
+DataTable(Baseline,True,100)               'Called, Size 100
+  TableFile ("USR:Baseline",15,0,1,0,Min,OutStat,LastFileName)    'This writes the baseline table to a file on the USR drive. The overwrite without incrementing file number function requires OS 22 or newer!
+  Sample (NUM_REPS_TOTAL,Offset_Value(),IEEE4)
+EndTable
+''\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\ SUBROUTINES ////////////////////////////////
+''------------------------- Retrieve Baseline Values On Start-Up ---------------------------
+Sub Baselines
+  OpenBase = FileOpen ("USR:Baseline.dat","r",0)
+  If OpenBase = 0 Then
+    Flag(4) = True          'Set Flag 4 to true if no baseline table is present - this will create and write a new baseline table on first scan
+  Else
+    ReadBase = FileRead (OpenBase,BaseString,3000)
+    SplitStr (Offset_Value(),BaseString,",",NUM_REPS_TOTAL,0)
+  EndIf
+  CloseBase = FileClose(OpenBase)
+EndSub
+
+'------------------------- Set Baseline Values ---------------------------
+Sub Zero
+  Offset_Value() = DATA_COMPILED()
+  CallTable Baseline
+  Flag(4) = False
+EndSub
+
+BeginProg
+  Call Baselines        'Call Baselines subroutine to retrieve any previous baseline values in the USR drive
+
+  '---------------------- Set Flag1 High at Begining of Program to Start Data Collection ------------------------
+  Flag(1) = True
+  '---------------------- Set Flag2 low at Begining of Program to Disable Raw Data Continuous Collection ---------------------
+  Flag(2) = False
+  '---------------------- Set Flag3 Low at Begining of Program to Disable VW Diagnostic Data Collection ------------------------
+  Flag(3) = False
+  CPISpeed (500)
+  Scan(ScanInterval,mSec,1000,0)
+    PanelTemp (PTemp,15000)
+    PTemp = PTemp*1.8+32
+    Battery (BattVDC)
+    CDM_VW300Dynamic(CPI_ADDR_1,VW_OUT1(),DIAG1())
+    CDM_VW300Dynamic(CPI_ADDR_2,VW_OUT2(),DIAG2())
+    CDM_VW300Dynamic(CPI_ADDR_3,VW_OUT3(),DIAG3())
+    CDM_VW300Dynamic(CPI_ADDR_4,VW_OUT4(),DIAG4())
+    CDM_VW300Dynamic(CPI_ADDR_5,VW_OUT5(),DIAG5())
+    CDM_VW300Dynamic(CPI_ADDR_6,VW_OUT6(),DIAG6())
+    CDM_VW300Dynamic(CPI_ADDR_7,VW_OUT7(),DIAG7())
+    CDM_VW300Dynamic(CPI_ADDR_8,VW_OUT8(),DIAG8())
+    CDM_VW300Dynamic(CPI_ADDR_9,VW_OUT9(),DIAG9())
+    CDM_VW300Dynamic(CPI_ADDR_10,VW_OUT10(),DIAG10())
+    'CDM_VW300Dynamic(CPI_ADDR_11,VW_OUT11(),DIAG11())
+    CDM_VoltDiff (CDM_A116,CPI_ADDR_12,S_POT(),NUM_SPOT,mV5000,1,True,100,1000,MULT_SPOT,0)
+    CDM_BrFull (CDM_A116,CPI_ADDR_12,TML(),NUM_TML,mV5000,13,X4,2,2000,False,False,100,1000,MULT_TML,0)
+    '
+    If TimeIntoInterval (0,1,Min) Then 'Process static data only once per hour
+      CDM_VW300Static(CPI_ADDR_1,VW_STATIC_OUT1(),VW_STATIC_THERM1(),VW_STATIC_SD1())
+      CDM_VW300Static(CPI_ADDR_2,VW_STATIC_OUT2(),VW_STATIC_THERM2(),VW_STATIC_SD2())
+      CDM_VW300Static(CPI_ADDR_3,VW_STATIC_OUT3(),VW_STATIC_THERM3(),VW_STATIC_SD3())
+      CDM_VW300Static(CPI_ADDR_4,VW_STATIC_OUT4(),VW_STATIC_THERM4(),VW_STATIC_SD4())
+      CDM_VW300Static(CPI_ADDR_5,VW_STATIC_OUT5(),VW_STATIC_THERM5(),VW_STATIC_SD5())
+      CDM_VW300Static(CPI_ADDR_6,VW_STATIC_OUT6(),VW_STATIC_THERM6(),VW_STATIC_SD6())
+      CDM_VW300Static(CPI_ADDR_7,VW_STATIC_OUT7(),VW_STATIC_THERM7(),VW_STATIC_SD7())
+      CDM_VW300Static(CPI_ADDR_8,VW_STATIC_OUT8(),VW_STATIC_THERM8(),VW_STATIC_SD8())
+      CDM_VW300Static(CPI_ADDR_9,VW_STATIC_OUT9(),VW_STATIC_THERM9(),VW_STATIC_SD9())
+      CDM_VW300Static(CPI_ADDR_10,VW_STATIC_OUT10(),VW_STATIC_THERM10(),VW_STATIC_SD10())
+      'CDM_VW300Static(CPI_ADDR_11,VW_STATIC_OUT11(),VW_STATIC_THERM11(),VW_STATIC_SD11())
+      For I = 1 To 8
+        VW_STATIC_THERM1(I)=VW_STATIC_THERM1(I)*1.8+32
+        VW_STATIC_THERM2(I)=VW_STATIC_THERM2(I)*1.8+32
+        VW_STATIC_THERM3(I)=VW_STATIC_THERM3(I)*1.8+32
+        VW_STATIC_THERM4(I)=VW_STATIC_THERM4(I)*1.8+32
+        VW_STATIC_THERM5(I)=VW_STATIC_THERM5(I)*1.8+32
+        VW_STATIC_THERM6(I)=VW_STATIC_THERM6(I)*1.8+32
+        VW_STATIC_THERM7(I)=VW_STATIC_THERM7(I)*1.8+32
+        VW_STATIC_THERM8(I)=VW_STATIC_THERM8(I)*1.8+32
+        VW_STATIC_THERM9(I)=VW_STATIC_THERM9(I)*1.8+32
+        VW_STATIC_THERM10(I)=VW_STATIC_THERM10(I)*1.8+32
+        'VW_STATIC_THERM11(I)=VW_STATIC_THERM11(I)*1.8+32
+      Next I
+      'CallTable OUT_STATIC
+    EndIf
+    
+
+    'Restructure vibrating wire sensors into a single output variable
+    For I = 1 To 8
+      DATA_COMPILED(I,1)=VW_OUT1(I,1)
+      DATA_COMPILED(I+8*1,1)=VW_OUT2(I,1)
+      DATA_COMPILED(I+8*2,1)=VW_OUT3(I,1)
+      DATA_COMPILED(I+8*3,1)=VW_OUT4(I,1)
+      DATA_COMPILED(I+8*4,1)=VW_OUT5(I,1)
+      DATA_COMPILED(I+8*5,1)=VW_OUT6(I,1)
+      DATA_COMPILED(I+8*6,1)=VW_OUT7(I,1)
+      DATA_COMPILED(I+8*7,1)=VW_OUT8(I,1)
+      DATA_COMPILED(I+8*8,1)=VW_OUT9(I,1)
+      DATA_COMPILED(I+8*9,1)=VW_OUT10(I,1)
+      'DATA_COMPILED(I+8*10,1)=VW_OUT11(I,1)
+    Next I
+
+    'Restructure string pot sensors into a single output variable
+    For I = 1 To NUM_SPOT
+      DATA_COMPILED(I+8*10,1)=S_POT(I,1)
+    Next I
+
+    'Restructure TML sensors into a single output variable
+    For I = 1 To NUM_TML
+      DATA_COMPILED(I+8*10+NUM_SPOT,1)=TML()
+    Next I
+
+    'Define control flag for zeroing
+    If Flag(4) = True Then Call Zero
+
+    'Subtract defined offset values from instantaneous measurements
+    For I = 1 To NUM_REPS_TOTAL
+      DATA_ZERO(I,1) = DATA_COMPILED(I,1)-Offset_Value(I)
+    Next I
+
+    'NOTE: DEFINE TRIGGER VARIABLE (RUTGERS TASK)
+    Trigger = DATA_COMPILED(1)
+
+    'Call output tables
+    CallTable AVG_DATA
+    CallTable OUT_DYNAMIC
+    CallTable LogStat
+    CallTable RawData_Dynamic
+    CallTable VW_Diagnostics
+
+  NextScan
+
+EndProg

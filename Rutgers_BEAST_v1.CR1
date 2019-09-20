@@ -1,0 +1,134 @@
+'                       Program name: Rutgers_BEAST_v1.CR1
+'                       Date written: 02-15-2019
+'                       Written By: NCD
+'
+'   Program Revisions:
+'
+'              Date: 02/15/2019     By: NCD     Version: b.0.0     Description: Beta Version 0.0
+'              Date: 03/05/2019     By: NCD     Version: 1     Description: Production Version 1.0
+'
+'   DataLogger:      CR1000 Datalogger with one AM16/32B MUX (MUX SET TO 32 MODE).
+'                    Configured for 6 moisture sensors and thermistors
+'                    Scanning interval set to 1 sample per ten seconds
+'
+'   Sensors:         6 sensors currently being used:
+'                    6 embedded moisture sensors (EMS) from SMT. Integral thermistors included.
+'
+'   Output Tables:   1 - AvgData
+'                           - Triggered on Flag(1) High
+'                           - Records max, min, and average for all sensors every hour
+'                    2 - LogStat
+'                           - Records Batt voltage, Batt Current, Load, Voltage_in, Current_in, Charge, Temp, Charge State, Check Battery every hour
+'                    3 - RawData
+'                           - Triggered on Flag(2) High
+'                           - Sample all sensors at fastest rate possible
+'
+'   Flags:           1 - High: Record data into Data Table 1
+'                        Low: Stops recording of data into Table 1.
+'                        Default Value: True
+'                        Conditional Change of State: No, Always True
+'                    2 - High: Record data into Data Table 3
+'                        Low: Stops recording of data into Table 3.
+'                        Default Value: False
+'                        Conditional Change of State: No, Always False (For onsite diagnostics)
+'
+'
+'
+'   Ports:           1 - AM16/32b CLK
+'                    2 - AM16/32B RES
+'
+'
+'
+'
+'\\\\\\\\\\\\\\\\\\\\\\\\\\  DECLARE VARIABLES //////////////////////////
+'
+'-------------------------  USER INPUT SECTION  --------------------------------
+
+Const ScanInterval = 10                             'INPUT the scan interval (in seconds) based on the number of gages
+
+'------------------------  GENERAL VARIABLE DEFINITIONS  -----------------------
+Const NUM_HYGRO = 6
+Public HYGRO_OUT(NUM_HYGRO),Temp(NUM_HYGRO), PTemp(1), BattVDC(1), RH_OUT(6)
+Public Flag(3)
+Dim  I, DV_OUT(NUM_HYGRO), Resistance_out(NUM_HYGRO), MC_out(NUM_HYGRO), EXCITATION(), Therm(NUM_HYGRO), Temp_C(6)
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\\  DEFINE TABLES //////////////////////////
+' Define Storage Tables
+DataTable (AVG_DATA,Flag(1),-1 )
+  DataInterval (0,1,Min,10)
+  Average (NUM_HYGRO,HYGRO_OUT(),IEEE4,False)
+  Maximum (NUM_HYGRO,HYGRO_OUT(),IEEE4,False,False)
+  Minimum (NUM_HYGRO,HYGRO_OUT(),IEEE4,False,False)
+  Average (NUM_HYGRO,RH_OUT(),IEEE4,False)
+  Maximum (NUM_HYGRO,RH_OUT(),IEEE4,False,False)
+  Minimum (NUM_HYGRO,RH_OUT(),IEEE4,False,False)
+  Average (NUM_HYGRO,Temp(),FP2,False)
+  Maximum (NUM_HYGRO,Temp(),FP2,False,False)
+  Minimum (NUM_HYGRO,Temp(),FP2,False,False)
+EndTable
+
+DataTable(LogStat,True,250)               'Called, Size 500
+  DataInterval(0,1,Hr, 0)                '60 minute interval, Time stamp every interval
+  Sample (1,PTemp,FP2)
+  Sample (1,BattVDC,FP2,False)
+EndTable
+
+'---------------------------- Table 3 ----------------------------
+DataTable(RawData,Flag(2),250)         'Called, Size 500
+  DataInterval(0,0,0,0)                'Fast as possible, Time stamp every interval
+  Sample(NUM_HYGRO,HYGRO_OUT(),IEEE4)
+  Sample(NUM_HYGRO,Temp(),FP2)
+EndTable
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\\  BEGINNING OF PROGRAM //////////////////////////
+BeginProg
+  
+  '---------------------- Set Flag1 High at Begining of Program to Start Data Collection ------------------------
+  Flag(1) = True
+  '---------------------- Set Flag2 low at Begining of Program to Disable Raw Data Continuous Collection ---------------------
+  Flag(2) = False
+
+  Scan(ScanInterval,Sec,1000,0)
+    PanelTemp (PTemp,15000)
+    PTemp = PTemp*1.8+32                'Convert default paneltemp instruction measurement in Celsius to Fahrenheit
+    Battery (BattVDC)
+    
+    'Read the hygrometer thermistors (Channels 1 through 6 on the CR1000)
+    BrHalf3W (Therm(),NUM_HYGRO,Autorange,1,Vx1,2,2500,True ,0,_60Hz,10000,0)
+    For I = 1 To NUM_HYGRO
+      'Thermistor beta value = 3974 @ 25 degrees Celsius
+      Temp(I) = 1.8*((1/((1/(25 + 273.15)) + (1/3974)*LN (Therm(I)/3000)))-273.15)+32  'Conversion of resistance to temperature using the beta method. 
+    Next I
+
+    ' Read the hygrometers (Channels 1 through 6 on the AM16/32B (32 mode))
+    
+    PortSet(2,1)   'Turn AM16/32B Multiplexer On
+    Delay(0,150,mSec)    'Allow for settle time
+    I=1    'Initiate indexing
+    SubScan(0,uSec,NUM_HYGRO)
+      'Switch to next AM16/32B Multiplexer channel
+      PulsePort(1,10000)
+      'Generic Differential Voltage measurements 'VoltDiff() on AM16/32B Multiplexer
+      VoltDiff(DV_OUT(I),1,mv5000,7,True,0,_60Hz,1,0)    'Read output voltage from hygrometer
+      VoltDiff(EXCITATION,1,AutoRange,8,True,0,_60Hz,1,0)    'Read excitation voltage (V)
+      'Convert voltage to hygrometer resistance (equation derived by BDI). 
+      Resistance_out(I) = (((EXCITATION * 4990000)/(DV_OUT(I)))-4990000)/1000  'kohms
+      'Convert resistance to moisture content (equation provided by SMT).
+      MC_out(I) = EXP (4.095417-(0.14006*LN(Resistance_out(I)))) 
+      'Correct for temperature and species of the wood element (equation provided by SMT)
+      Temp_C(I) = 5/9*(Temp(I)-32)  'Temperature must be in Celsius for correction factor
+      HYGRO_OUT(I) = (((MC_out(I)+(0.567-0.026*Temp_C(I)+0.000051*(Temp_C(I)^2)))/(0.88*(1.0056^Temp_C(I))))-0.202)/0.822
+      'Convert moisture content reading into relative humidity (%) (equation provided by SMT). 
+      RH_OUT(I) = 0.000438*(HYGRO_OUT(I)^4) - 0.031*(HYGRO_OUT(I)^3) + 0.63*(HYGRO_OUT(I)^2) + 0.72*(HYGRO_OUT(I))-0.07
+      I=I+1
+    NextSubScan
+    
+    'Turn AM16/32B Multiplexer Off
+    PortSet(2,0)
+    'Call Data Tables and Store Data
+
+    CallTable AVG_DATA
+    CallTable LogStat
+    CallTable RawData
+  NextScan
+EndProg
